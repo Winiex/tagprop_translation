@@ -1,0 +1,199 @@
+\documentclass[a4paper,twocolumn]{ctexart}
+\usepackage{ulem}
+
+\title{TagProp: Discriminative Metric Learning in Nearest Neighbor Models for Image Auto-Annotation 译文}
+\author{聂伟琳}
+\date{\today}
+
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+
+图像自动标注是计算机视觉领域中一个很重要的开放问题。
+针对这个问题，我们提出了一个判别式训练的近邻模型——TapProp。
+在这个模型中，被测试的图片的标签通过使用一个带权重的近邻模型来获取标记过的训练图片集合的方式被预测出来。
+而邻居之间的权重则基于邻居排行或者邻居与被测试对象之间的距离。
+TapProp 通过直接地最大化预测标签在训练集中的对数似然度的方式，让集成度量学习成为了可能。
+如此一来，我们可以将一系列针对图片内容不同方面的特征（譬如局部形状描述符，又譬如全局颜色直方图）的相似度的度量方法非常高效地联系起来。
+为了增加对于少见的单词的回想，我们同时也引进了一种针对单词的对于带权重的近邻标签预测进行的\sout{反曲调制}（sigmoidal modulation）。
+我们调研了该模型不同变种的运行情况，同时也和其他已经存在的相关工作进行了对比。
+我们在三个带有挑战性的数据集上展示了实验结果。
+并且，在这全部的三个数据集上，TagProp 都和其它当今的杰出工作相比有非常显著的进步。
+
+\end{abstract}
+
+\part{介绍}
+
+图像自动标注是一个很活跃的研究课题\cite{7,15,16,18}。
+它的目标是构建一种能够从标注词库中预测出新图片相关关键词的方法。
+这些对于关键词的预测可以被用于为图片推荐标签，以及为标签或者标签集推荐图片。
+随着用户提供的视觉内容（譬如照片、视频分享网站，以及桌面照片管理应用）正在变得越来越多，这种给图像进行自动标注的方法也变得越来越重要。
+这些超大规模的视觉素材集合引发了自动检索和自动标注的需求。
+拥有或多或少的结构化标注的图片正变得越来越多，这也使得机器学习的相关技术被应用进来，进而利用它通过评估精确化标签预测模型的方式来平衡这种可能性。
+
+虽然这个问题很困难，但是学术界还是通过对标准的已标注的数据集进行评估的方式取得了一些进展。
+在接下来的部分我们将详细介绍那些和我们的成果联系非常紧密的相关工作。
+现存的相关工作主要存在两个方面的缺点。
+第一点是，模型总是想通过评估来将图片特性和标注之间的生成似然度提高到最大，这样可能对标签预测并不能起到优化作用。
+第二点是，许多参量模型并没有足够的能力去精确地获取到图片内容和标注之间极为复杂的依赖关系。
+而非参量近邻模型化的方法已经被证明在标签预测上非常成功\cite{5,11,13,17,22,27}。
+这主要可以归因于这种类型的模型的高“适配度”：它们可以在更多的数据能够被获取的情况下适配数据中存在的模式。
+然而，现成的近邻类型的方法并不能集成定义了近邻从而最大化模型预测效率的度量学习。除去一些展示了针对某些特定计算机视觉问题（譬如图像分类\cite{12}，图像检索\cite{10}，或者是视觉辨识\cite{9}）的度量学习的优点的现存工作外， 在这些近邻类型的方法之中，要么使用的是单一的度量\cite{5,27}，要么使用的是几个度量之间的专有关联\cite{17}。
+
+在这篇论文中，我们展示了 TapProp——它是 Tag Propagation 的缩写——一种新的通过近邻之间标签的存在或缺失的权重联系来预测标签的近邻类模型。
+我们所作出的贡献如下所述。
+第一，邻居的权重基于邻居的排名或距离来决定，并且自动地通过最大化针对训练图片集的似然度的方式来自动设置。
+基于排名的权重中第 k 个邻居将总是获得一个固定的权重，而基于距离的权重则会随着距离的增加发生指数级别的衰减。
+我们的标签预测模型从概念上来说是比较简单的，但是依然在使用同样的特征集的情况下获得了比其他一下优秀的方案更好的表现。
+第二，和先前的工作不同的是，我们的模型允许对于度量学习的集成。
+这使得我们能够通过一些改进（譬如使用图片特征之间的马氏距离，又或者使用几个距离测量的联合）来完善标签预测工作中邻居权重的定义。
+第三，TagProp 包含了针对单词的逻辑判别式模型。
+这些模型使用单词不变式模型的标签预测和作为输入，而且每个单词的标记仅仅使用了两个参数，从而增加或者减少非常常见或者非常罕见的单词标签呈现的可能性。
+这使得被回想起来的单词的数目被显著地提高了。
+
+为了评估我们的模型并且将之和之前的工作进行比较，我们使用了三个数据集—— Corel 5k， IAPR TC12 以及 ESP Game——而评估标准有精确度、回想度、平均准确率以及盈亏平衡点。在图 1 中，我们展示了几个带有相应标注的图像的范例，以及对于这些图片我们的模型所做的标注的预测。在所有的数据集以及评估标准上我们都会展示我们的模型相对于其它早期的工作而言在精确度上的巨大提升。
+
+这篇论文剩下的部分将会是这样的。在接下来的部分我们给出了相关工作的一个概览。然后，在第三部分，我们将展示我们的标签预测模型，以及我们是怎样评估他们的参数的。在第四部分，我们将展示那三个数据集、评估场景以及在我们的试验中所使用的图像特征集合。实验的结构将在第五部分被展示。而在第六部分，我们将展示我们的结论以及我们进一步研究的方向。
+
+\part{相关工作}
+
+在这个部分中我们将会讨论那些和我们的工作最为相关的针对图形自动标注以及关键字检索的模型。我们将这些模型分为了四个主要的类别：基于主题模型的、基于混合模型的，判别式训练的以及近邻模型类的。
+
+
+
+\newpage
+
+\begin{thebibliography} {99}
+
+\bibitem{1}
+K. Barnard, P. Duygulu, D. Forsyth, N. de Freitas, D. Blei,
+and M. Jordan. Matching words and pictures. JMLR,
+3:1107–1135, 2003.
+
+\bibitem{2}
+G. Carneiro, A. Chan, P. Moreno, and N. Vasconcelos. Su-
+pervised learning of semantic classes for image annotation
+and retrieval. PAMI, 29(3):394–410, 2007.
+
+\bibitem{3}
+C. Cusano, G. Ciocca, and R. Schettini. Image annotation
+using SVM. In Proceedings Internet imaging (SPIE), volume
+5304, 2004.
+
+\bibitem{4}
+P. Duygulu, K. Barnard, N. de Freitas, and D. Forsyth. Object
+recognition as machine translation: Learning a lexicon for a
+ﬁxed image vocabulary. In ECCV, 2002.
+
+\bibitem{5}
+S. Feng, R. Manmatha, and V. Lavrenko. Multiple Bernoulli
+relevance models for image and video annotation. In CVPR,
+2004.
+
+\bibitem{6}
+A. Globerson and S. Roweis. Metric learning by collapsing
+classes. In NIPS, 2006.
+
+\bibitem{7}
+D. Grangier and S. Bengio. A discriminative kernel-based
+model to rank images from text queries. PAMI, 30(8):1371–
+1384, 2008.
+
+\bibitem{8}
+M. Grubinger. Analysis and Evaluation of Visual Informa-
+tion Systems Performance. PhD thesis, Victoria University,
+Melbourne, Australia, 2007.
+
+\bibitem{9}
+M. Guillaumin, J. Verbeek, and C. Schmid. Is that you?
+Metric learning approaches for face identiﬁcation. In ICCV,
+2009.
+
+\bibitem{10}
+T. Hertz, A. Bar-Hillel, and D. Weinshall. Learning distance
+functions for image retrieval. In CVPR, 2004.
+
+\bibitem{11}
+J. Jeon, V. Lavrenko, and R. Manmatha. Automatic image
+annotation and retrieval using cross-media relevance models.
+In ACM SIGIR, 2003.
+
+\bibitem{12}
+R. Jin, S. Wang, and Z.-H. Zhou. Learning a distance metric
+from multi-instance multi-label data. In CVPR, 2009.
+
+\bibitem{13}
+V. Lavrenko, R. Manmatha, and J. Jeon. A model for learn-
+ing the semantics of pictures. In NIPS, 2003.
+
+\bibitem{14}
+S. Lazebnik, C. Schmid, and J. Ponce. Beyond bags of
+features: spatial pyramid matching for recognizing natural
+scene categories. In CVPR, 2006.
+
+\bibitem{15}
+J. Li and J. Wang. Real-time computerized annotation of
+pictures. PAMI, 30(6):985–1002, 2008.
+
+\bibitem{16}
+J. Liu, M. Li, Q. Liu, H. Lu, and S. Ma. Image annotation via
+graph learning. Pattern Recognition, 42(2):218–228, 2009.
+
+\bibitem{17}
+A. Makadia, V. Pavlovic, and S. Kumar. A new baseline for
+image annotation. In ECCV, 2008.
+
+\bibitem{18}
+T. Mei, Y. Wang, X. Hua, S. Gong, and S. Li. Coherent
+image annotation by learning semantic distance. In Proceed-
+ings of IEEE Conference on Computer Vision and Pattern
+Recognition, 2008.
+
+\bibitem{19}
+D. Metzler and R. Manmatha. An inference network ap-
+proach to image retrieval. In CIVR, 2004.
+
+\bibitem{20}
+F. Monay and D. Gatica-Perez. PLSA-based image auto-
+annotation: Constraining the latent space. In ACM Multime-
+dia, 2004.
+
+\bibitem{21}
+A. Oliva and A. Torralba. Modeling the shape of the scene:
+a holistic representation of the spatial envelope. IJCV,
+42(3):145–175, 2001.
+
+\bibitem{22}
+J. Pan, H. Yang, C. Faloutsos, and P. Duygulu. Automatic
+multimedia cross-modal correlation discovery. In ACM
+SIGKDD, 2004.
+
+\bibitem{23}
+J. van de Weijer and C. Schmid. Coloring local feature ex-
+traction. In ECCV, 2006.
+
+\bibitem{24}
+L. Von Ahn and L. Dabbish. Labeling images with a com-
+puter game. In ACM SIGCHI, 2004.
+
+\bibitem{25}
+O. Yakhnenko and V. Honavar. Annotating images and im-
+age objects using a hierarchical Dirichlet process model.
+In Workshop on Multimedia Data Mining ACM SIGKDD,
+2008.
+
+\bibitem{26}
+A. Yavlinsky, E. Schoﬁeld, and S. R¨uger. Automated image
+annotation using global features and robust nonparametric
+density estimation. In CIVR, 2005.
+
+\bibitem{27}
+H. Zhang, A. Berg, M. Maire, and J. Malik. SVM-KNN:
+Discriminative nearest neighbor classiﬁcation for visual cat-
+egory recognition. In CVPR, pages 2126–2136, 2006.
+
+\end{thebibliography}
+
+\end{document}
